@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <title>家計簿アプリ</title>
+    <?!= include('css'); ?>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>家計簿アプリ</h1>
+        <div class="month-selector">
+          <label for="month-select">月選択:</label>
+          <select id="month-select"></select>
+        </div>
+      </header>
+
+      <main>
+        <section class="input-form">
+          <h2>支出を記録</h2>
+          <form id="expense-form">
+            <input type="date" id="date" required>
+            <input type="text" id="place" placeholder="場所 (例: スーパーA)">
+            <input type="text" id="item" placeholder="品名 (例: 牛乳、パン)">
+            <input type="number" id="amount" placeholder="金額" inputmode="numeric" required>
+            <input list="genre-list" id="genre" placeholder="ジャンル" required>
+            <datalist id="genre-list"></datalist>
+            <button type="submit">登録する</button>
+          </form>
+          <div id="message-area"></div>
+        </section>
+
+        <section class="summary">
+          <h2>今月のサマリー</h2>
+          <div id="summary-content">
+            <p>変動費合計: <span id="variable-total">0</span> 円</p>
+            <p>固定費合計: <span id="fixed-total">0</span> 円</p>
+            <p class="grand-total"><strong>総合計: <span id="grand-total">0</span> 円</strong></p>
+            <div id="genre-summary"></div>
+          </div>
+        </section>
+        
+        <section class="data-table">
+          <h2>支出一覧</h2>
+          <div class="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>日付</th>
+                  <th>場所</th>
+                  <th>品名</th>
+                  <th>金額</th>
+                  <th>ジャンル</th>
+                </tr>
+              </thead>
+              <tbody id="expense-table-body">
+              </tbody>
+            </table>
+          </div>
+        </section>
+        
+        <section class="genre-management">
+          <h2>ジャンル管理</h2>
+          <form id="add-genre-form">
+            <input type="text" id="new-genre" placeholder="新しいジャンル名">
+            <button type="submit">追加</button>
+          </form>
+        </section>
+      </main>
+
+    </div>
+    <?!= include('javascript'); ?>
+  </body>
+</html>
