@@ -1,146 +1,235 @@
-const ss = SpreadsheetApp.getActiveSpreadsheet();
+<script>
+  let fixedCosts = [];
+  let fixedTotal = 0;
 
-// WebアプリのGETリクエストを処理
-function doGet() {
-  initialSetup(); // 初回起動時にシートなどを準備
-  const html = HtmlService.createTemplateFromFile('index').evaluate();
-  html.setTitle('家計簿アプリ')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-  return html;
-}
-
-// 初期設定
-function initialSetup() {
-  // 「設定」シートの確認と作成
-  let configSheet = ss.getSheetByName('設定');
-  if (!configSheet) {
-    configSheet = ss.insertSheet('設定');
-    configSheet.getRange('A1').setValue('ジャンル').setFontWeight('bold');
-    const sampleGenres = [['食費'], ['日用品'], ['交通費'], ['交際費'], ['趣味'], ['その他']];
-    configSheet.getRange(2, 1, sampleGenres.length, 1).setValues(sampleGenres);
-  }
-
-  // 「固定費」シートの確認と作成
-  let fixedCostSheet = ss.getSheetByName('固定費');
-  if (!fixedCostSheet) {
-    fixedCostSheet = ss.insertSheet('固定費');
-    fixedCostSheet.getRange('A1:B1').setValues([['項目', '金額']]).setFontWeight('bold');
-    const sampleFixedCosts = [['家賃', 80000], ['水道光熱費', 10000], ['通信費', 5000]];
-    fixedCostSheet.getRange(2, 1, sampleFixedCosts.length, 2).setValues(sampleFixedCosts);
-  }
-
-  // 当月シートの確認と作成
-  const today = new Date();
-  const currentMonthSheetName = Utilities.formatDate(today, 'JST', 'yyyy-MM');
-  let currentMonthSheet = ss.getSheetByName(currentMonthSheetName);
-  if (!currentMonthSheet) {
-    currentMonthSheet = ss.insertSheet(currentMonthSheetName, 0);
-    const headers = [['登録日時', '日付', '場所', '品名', '金額', 'ジャンル']];
-    currentMonthSheet.getRange('A1:F1').setValues(headers).setFontWeight('bold');
-    currentMonthSheet.setFrozenRows(1);
-  }
-}
-
-// 他のHTMLファイルをインクルードするための関数
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
-
-// --- フロントエンドから呼び出される関数群 ---
-
-/**
- * データをスプレッドシートに保存します。
- * @param {object} data 保存するデータオブジェクト。
- * @return {object} 処理結果。
- */
-function saveData(data) {
-  try {
-    // 入力された日付 (例: "2025-07-15") からシート名 (例: "2025-07") を生成
-    const expenseDate = new Date(data.date);
-    const sheetName = Utilities.formatDate(expenseDate, 'JST', 'yyyy-MM');
-    
-    let sheet = ss.getSheetByName(sheetName);
-    
-    // もし該当月のシートがなければ、新しく作成する
-    if (!sheet) {
-      sheet = ss.insertSheet(sheetName, 0);
-      const headers = [['登録日時', '日付', '場所', '品名', '金額', 'ジャンル']];
-      sheet.getRange('A1:F1').setValues(headers).setFontWeight('bold');
-      sheet.setFrozenRows(1);
-    }
-    
-    const timestamp = new Date();
-    sheet.appendRow([timestamp, data.date, data.place, data.item, data.amount, data.genre]);
-    
-    return { status: 'success', message: '保存しました。' };
-  } catch (e) {
-    return { status: 'error', message: '保存に失敗しました: ' + e.message };
-  }
-}
-
-/**
- * 指定された月のデータを読み込みます。
- * @param {string} month 読み込む月 (例: "2025-08")。
- * @return {Array<Array<string>>} 支出データの配列。
- */
-function loadData(month) {
-  const sheet = ss.getSheetByName(month);
-  if (!sheet) return [];
-  const data = sheet.getDataRange().getValues();
-  data.shift(); // ヘッダー行を削除
-  return data.map(row => {
-    row[0] = row[0] ? Utilities.formatDate(new Date(row[0]), 'JST', 'yyyy/MM/dd HH:mm:ss') : '';
-    row[1] = row[1] ? Utilities.formatDate(new Date(row[1]), 'JST', 'yyyy-MM-dd') : '';
-    return row;
+  // ページ読み込み完了時の処理
+  document.addEventListener('DOMContentLoaded', () => {
+    initialize();
+    document.getElementById('expense-form').addEventListener('submit', handleSaveData);
+    document.getElementById('add-genre-form').addEventListener('submit', handleAddGenre);
+    document.getElementById('month-select').addEventListener('change', handleMonthChange);
   });
-}
 
-/**
- * ジャンル一覧を取得します。
- * @return {Array<string>} ジャンルの配列。
- */
-function getGenres() {
-  const sheet = ss.getSheetByName('設定');
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  const genres = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
-  return genres.flat();
-}
-
-/**
- * 新しいジャンルを追加します。
- * @param {string} genre 追加するジャンル名。
- * @return {object} 処理結果。
- */
-function addGenre(genre) {
-  if (!genre) return { status: 'error', message: 'ジャンル名が空です。'};
-  const sheet = ss.getSheetByName('設定');
-  const existingGenres = getGenres();
-  if (existingGenres.includes(genre)) {
-    return { status: 'error', message: '同じ名前のジャンルが既に存在します。'};
+  // 初期化関数
+  function initialize() {
+    showLoading(true);
+    const today = new Date();
+    document.getElementById('date').value = today.toISOString().slice(0, 10);
+    
+    google.script.run.withSuccessHandler(setupMonthSelector).getSheetNames();
+    google.script.run.withSuccessHandler(setupGenreList).getGenres();
+    google.script.run.withSuccessHandler(setupFixedCosts).getFixedCosts();
   }
-  sheet.appendRow([genre]);
-  return { status: 'success', message: 'ジャンルを追加しました。', newGenre: genre };
-}
+  
+  // 月選択プルダウンのセットアップ
+  function setupMonthSelector(sheetNames) {
+    const select = document.getElementById('month-select');
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    if (!sheetNames.includes(currentMonth)) {
+        sheetNames.unshift(currentMonth);
+    }
+    sheetNames.forEach(name => {
+      const option = document.createElement('option');
+      option.value = name;
+      option.textContent = name;
+      select.appendChild(option);
+    });
+    loadDataForMonth(select.value);
+  }
 
-/**
- * 固定費一覧を取得します。
- * @return {Array<Array<string|number>>} 固定費の項目と金額の配列。
- */
-function getFixedCosts() {
-  const sheet = ss.getSheetByName('固定費');
-  const data = sheet.getDataRange().getValues();
-  data.shift();
-  return data;
-}
+  // ジャンルリストのセットアップ
+  function setupGenreList(genres) {
+    const datalist = document.getElementById('genre-list');
+    datalist.innerHTML = '';
+    genres.forEach(genre => {
+      const option = document.createElement('option');
+      option.value = genre;
+      datalist.appendChild(option);
+    });
+  }
+  
+  // 固定費のセットアップ
+  function setupFixedCosts(costs) {
+    fixedCosts = costs;
+    fixedTotal = costs.reduce((sum, row) => sum + (Number(row[1]) || 0), 0);
+    document.getElementById('fixed-total').textContent = fixedTotal.toLocaleString();
+    updateGrandTotal();
+  }
 
-/**
- * 月ごとのシート名一覧を取得します。
- * @return {Array<string>} シート名の配列。
- */
-function getSheetNames() {
-  const sheets = ss.getSheets();
-  const sheetNames = sheets.map(sheet => sheet.getName());
-  return sheetNames.filter(name => /^\d{4}-\d{2}$/.test(name)).sort().reverse();
-}
+  // データ保存処理
+  function handleSaveData(e) {
+    e.preventDefault();
+
+    // ▼ここからバリデーションチェックを追加▼
+    const placeValue = document.getElementById('place').value.trim();
+    const itemValue = document.getElementById('item').value.trim();
+
+    if (!placeValue && !itemValue) {
+      showMessage('「場所」と「品名」のどちらか一方は入力してください。', 'error');
+      return; // 処理を中断
+    }
+    // ▲ここまで追加▲
+
+    showLoading();
+    const data = {
+      month: document.getElementById('month-select').value,
+      date: document.getElementById('date').value,
+      place: placeValue,
+      item: itemValue,
+      amount: document.getElementById('amount').value,
+      genre: document.getElementById('genre').value,
+    };
+
+    google.script.run.withSuccessHandler(response => {
+      showMessage(response.message, response.status);
+      if (response.status === 'success') {
+        e.target.reset();
+        document.getElementById('date').value = new Date().toISOString().slice(0, 10);
+        loadDataForMonth(data.month);
+      } else {
+        hideLoading();
+      }
+    }).withFailureHandler(err => {
+        showMessage(err.message, 'error');
+        hideLoading();
+    }).saveData(data);
+  }
+  
+  // ジャンル追加処理
+  function handleAddGenre(e) {
+      e.preventDefault();
+      showLoading();
+      const newGenreInput = document.getElementById('new-genre');
+      const newGenre = newGenreInput.value.trim();
+      if (!newGenre) {
+        showMessage('ジャンル名を入力してください。', 'error');
+        hideLoading();
+        return;
+      }
+      google.script.run.withSuccessHandler(response => {
+          showMessage(response.message, response.status);
+          if (response.status === 'success') {
+              const datalist = document.getElementById('genre-list');
+              const option = document.createElement('option');
+              option.value = response.newGenre;
+              datalist.appendChild(option);
+              newGenreInput.value = '';
+          }
+          hideLoading();
+      }).withFailureHandler(err => {
+          showMessage(err.message, 'error');
+          hideLoading();
+      }).addGenre(newGenre);
+  }
+
+  // 月変更処理
+  function handleMonthChange(e) {
+    loadDataForMonth(e.target.value);
+  }
+
+  // 指定月のデータを読み込み
+  function loadDataForMonth(month) {
+    showLoading(true);
+    google.script.run.withSuccessHandler(updateUIWithData).withFailureHandler(err => {
+        showMessage(err.message, 'error');
+        hideLoading();
+    }).loadData(month);
+  }
+
+  // データでUIを更新
+  function updateUIWithData(data) {
+    const tbody = document.getElementById('expense-table-body');
+    tbody.innerHTML = '';
+    let variableTotal = 0;
+    const genreTotals = {};
+
+    data.sort((a, b) => new Date(a[1]) - new Date(b[1]));
+
+    data.forEach(row => {
+      const tr = document.createElement('tr');
+      const date = new Date(row[1]);
+      const formattedDate = `${date.getMonth()+1}/${date.getDate()}`;
+      // ▼ここから一覧表示の行を修正▼
+      tr.innerHTML = `
+        <td>${formattedDate}</td>
+        <td>${escapeHTML(row[2])}</td>
+        <td>${escapeHTML(row[3])}</td>
+        <td>${Number(row[4]).toLocaleString()} 円</td>
+        <td>${escapeHTML(row[5])}</td>
+      `;
+      // ▲ここまで修正▲
+      tbody.appendChild(tr);
+
+      const amount = Number(row[4]) || 0;
+      const genre = row[5] || '未分類';
+      variableTotal += amount;
+      genreTotals[genre] = (genreTotals[genre] || 0) + amount;
+    });
+
+    document.getElementById('variable-total').textContent = variableTotal.toLocaleString();
+    
+    const genreSummaryDiv = document.getElementById('genre-summary');
+    genreSummaryDiv.innerHTML = '<h3>ジャンル別合計</h3>';
+    
+    const chartContainer = document.createElement('div');
+    chartContainer.className = 'chart-container';
+
+    const sortedGenres = Object.entries(genreTotals).sort((a, b) => b[1] - a[1]);
+    const maxTotal = sortedGenres.length > 0 ? sortedGenres[0][1] : 0;
+
+    if (maxTotal > 0) {
+        sortedGenres.forEach(([genre, total]) => {
+            const percentage = (total / maxTotal) * 100;
+            const row = document.createElement('div');
+            row.className = 'chart-bar-row';
+            const labelDiv = document.createElement('div');
+            labelDiv.className = 'chart-label';
+            labelDiv.innerHTML = `<span>${escapeHTML(genre)}</span><strong>${total.toLocaleString()} 円</strong>`;
+            const barBg = document.createElement('div');
+            barBg.className = 'chart-bar-bg';
+            const bar = document.createElement('div');
+            bar.className = 'chart-bar';
+            
+            barBg.appendChild(bar);
+            row.appendChild(labelDiv);
+            row.appendChild(barBg);
+            chartContainer.appendChild(row);
+            
+            setTimeout(() => { bar.style.width = percentage + '%'; }, 100);
+        });
+    } else {
+      chartContainer.textContent = '今月の支出データはまだありません。';
+    }
+    genreSummaryDiv.appendChild(chartContainer);
+    
+    updateGrandTotal();
+    hideLoading();
+  }
+
+  // 総合計を更新
+  function updateGrandTotal() {
+    const variableTotal = Number(document.getElementById('variable-total').textContent.replace(/,/g, '')) || 0;
+    const grandTotal = variableTotal + fixedTotal;
+    document.getElementById('grand-total').textContent = grandTotal.toLocaleString();
+  }
+  
+  function showMessage(msg, type) {
+      const area = document.getElementById('message-area');
+      area.textContent = msg;
+      area.className = type === 'success' ? 'message-success' : 'message-error';
+      setTimeout(() => { area.className = ''; area.style.display = 'none'; }, 4000);
+  }
+  
+  function escapeHTML(str) {
+      return str.toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[m]);
+  }
+
+  // ローディング表示（簡易版）
+  function showLoading(isInitial = false) {
+      document.body.style.cursor = 'wait';
+      if(isInitial) document.getElementById('expense-table-body').innerHTML = '<tr><td colspan="5" style="text-align:center;">読み込み中...</td></tr>';
+  }
+  function hideLoading() {
+      document.body.style.cursor = 'default';
+  }
+</script>
